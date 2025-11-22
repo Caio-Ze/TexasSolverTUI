@@ -1,14 +1,15 @@
 use std::error::Error;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::env;
 
-const JOB_FILE_PATH: &str = "resources/text/job_config.txt";
-const OUTPUT_JSON_PATH: &str = "./strategy.json";
-const RESOURCE_DIR: &str = "resources";
-// macOS-only: use the prebuilt console solver binary bundled with the TUI
-const CONSOLE_SOLVER_PATH: &str = "./TexasSolver-v0.2.0-MacOs/console_solver";
+// We will resolve these relative to the executable path at runtime
+const JOB_FILE_REL_PATH: &str = "resources/text/job_config_debug.txt";
+const OUTPUT_JSON_REL_PATH: &str = "strategy_debug.json";
+const RESOURCE_DIR_REL: &str = "resources";
+const CONSOLE_SOLVER_REL_PATH: &str = "TexasSolver-v0.2.0-MacOs/console_solver";
 
 // Public preflop ranges used in the job config. These come from the solver's
 // own presets (qb_ranges, 100bb 2.5x 500rake) so that our TUI matches a
@@ -18,9 +19,38 @@ pub const RANGE_IP: &str = "AA:1.0,A2s:1.0,A2o:0.0,A3s:1.0,A3o:0.016,A4s:1.0,A4o
 // OOP (out of position) = BB call vs BTN 2.5x open at 100bb.
 pub const RANGE_OOP: &str = "AA:0.0,A2s:1.0,A2o:0.0,A3s:0.822,A3o:0.0,A4s:0.282,A4o:0.48,A5s:0.0,A5o:0.93,A6s:0.766,A6o:0.432,A7s:0.412,A7o:0.976,A8s:0.616,A8o:0.928,A9s:0.818,A9o:0.876,ATs:0.13,ATo:0.918,AJs:0.0,AJo:0.526,AQs:0.0,AQo:0.03,AKs:0.0,AKo:0.0,22:1.0,32s:0.278,32o:0.0,42s:0.796,42o:0.0,52s:1.0,52o:0.0,62s:0.0,62o:0.0,72s:0.0,72o:0.0,82s:0.0,82o:0.0,92s:0.0,92o:0.0,T2s:0.0,T2o:0.0,J2s:0.782,J2o:0.0,Q2s:1.0,Q2o:0.0,K2s:1.0,K2o:0.0,33:1.0,43s:1.0,43o:0.0,53s:0.904,53o:0.0,63s:1.0,63o:0.0,73s:0.032,73o:0.0,83s:0.0,83o:0.0,93s:0.0,93o:0.0,T3s:0.23,T3o:0.0,J3s:1.0,J3o:0.0,Q3s:1.0,Q3o:0.0,K3s:1.0,K3o:0.0,44:1.0,54s:0.396,54o:0.0,64s:0.904,64o:0.0,74s:1.0,74o:0.0,84s:0.136,84o:0.0,94s:0.0,94o:0.0,T4s:0.252,T4o:0.0,J4s:0.996,J4o:0.0,Q4s:1.0,Q4o:0.0,K4s:1.0,K4o:0.0,55:0.972,65s:0.456,65o:0.0,75s:0.82,75o:0.0,85s:1.0,85o:0.0,95s:0.22,95o:0.0,T5s:0.622,T5o:0.0,J5s:0.802,J5o:0.0,Q5s:0.98,Q5o:0.0,K5s:0.898,K5o:0.0,66:0.832,76s:0.346,76o:0.224,86s:0.824,86o:0.0,96s:0.924,96o:0.0,T6s:0.758,T6o:0.0,J6s:0.84,J6o:0.0,Q6s:0.932,Q6o:0.0,K6s:0.736,K6o:0.0,77:0.704,87s:0.212,87o:0.382,97s:0.818,97o:0.0,T7s:0.726,T7o:0.0,J7s:0.55,J7o:0.0,Q7s:0.992,Q7o:0.0,K7s:0.856,K7o:0.0,88:0.486,98s:0.338,98o:0.372,T8s:0.248,T8o:0.42,J8s:0.606,J8o:0.038,Q8s:0.766,Q8o:0.0,K8s:0.64,K8o:0.442,99:0.084,T9s:0.0,T9o:0.876,J9s:0.0,J9o:0.89,Q9s:0.068,Q9o:1.0,K9s:0.306,K9o:0.91,TT:0.0,JTs:0.0,JTo:0.776,QTs:0.122,QTo:0.796,KTs:0.026,KTo:0.802,JJ:0.0,QJs:0.06,QJo:0.904,KJs:0.0,KJo:0.696,QQ:0.0,KQs:0.0,KQo:0.474,KK:0.0";
 
+fn get_exe_dir() -> PathBuf {
+    env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn get_absolute_path(rel_path: &str) -> PathBuf {
+    get_exe_dir().join(rel_path)
+}
+
 fn build_job_content(board: &str, hero_hand: &str) -> String {
     let generic = get_generic_hand(hero_hand);
     
+    // Determine how many rounds to dump based on the board length.
+    // Board format is comma separated cards.
+    // 3 cards = Flop (dump 1 round)
+    // 4 cards = Turn (dump 2 rounds)
+    // 5 cards = River (dump 3 rounds)
+    let card_count = board.split(',').filter(|s| !s.is_empty()).count();
+    let dump_rounds = match card_count {
+        3 => 1,
+        4 => 2,
+        _ => 3,
+    };
+
+    let output_path = get_absolute_path(OUTPUT_JSON_REL_PATH);
+    // We need to escape the path for the config file if it contains spaces, 
+    // but the solver might just take the string.
+    // For safety, we just pass the path string.
+    let output_path_str = output_path.to_string_lossy();
+
     let content = format!(
         r#"set_pot 50
 set_effective_stack 200
@@ -29,7 +59,6 @@ set_range_ip {range_ip}
 set_range_oop {range_oop}
 set_bet_sizes ip,flop,bet,50
 set_bet_sizes ip,turn,bet,50
-set_bet_sizes ip,river,bet,50
 set_allin_threshold 0.8
 set_thread_num 8
 set_accuracy 5.0
@@ -38,12 +67,14 @@ set_print_interval 10
 set_use_isomorphism 1
 build_tree
 start_solve
-set_dump_rounds 3
-dump_result strategy.json
+set_dump_rounds {dump_rounds}
+dump_result {output_path}
 "#,
         board = board,
         range_ip = activate_hand_in_range(RANGE_IP, &generic),
         range_oop = activate_hand_in_range(RANGE_OOP, &generic),
+        output_path = output_path_str,
+        dump_rounds = dump_rounds
     );
     content.trim().to_string() + "\n"
 }
@@ -112,49 +143,50 @@ fn activate_hand_in_range(range: &str, target_generic: &str) -> String {
         .join(",")
 }
 
-
-
-fn write_job_file(board: &str, hero_hand: &str) -> Result<(), Box<dyn Error>> {
-    if let Some(parent) = Path::new(JOB_FILE_PATH).parent() {
+fn write_job_file(board: &str, hero_hand: &str) -> Result<PathBuf, Box<dyn Error>> {
+    println!("DEBUG: Writing job file...");
+    let job_path = get_absolute_path(JOB_FILE_REL_PATH);
+    if let Some(parent) = job_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut f = fs::File::create(JOB_FILE_PATH)?;
+    let mut f = fs::File::create(&job_path)?;
     let content = build_job_content(board, hero_hand);
     f.write_all(content.as_bytes())?;
-    Ok(())
+    println!("DEBUG: Job file written to {}", job_path.display());
+    Ok(job_path)
 }
- 
+
 pub fn run_sample_job(board: &str, hero_hand: &str) -> Result<(), Box<dyn Error>> {
-    if Path::new(OUTPUT_JSON_PATH).exists() {
-        fs::remove_file(OUTPUT_JSON_PATH)?;
+    let output_path = get_absolute_path(OUTPUT_JSON_REL_PATH);
+    if output_path.exists() {
+        fs::remove_file(&output_path)?;
     }
     
-    write_job_file(board, hero_hand)?;
+    let job_path = write_job_file(board, hero_hand)?;
+    let solver_path = get_absolute_path(CONSOLE_SOLVER_REL_PATH);
+    let resource_dir = get_absolute_path(RESOURCE_DIR_REL);
     
     // Run the external console solver binary on macOS.
-    // We keep CWD at the TUI crate so that relative paths in JOB_FILE_PATH and
-    // SAMPLE_JOB_CONTENT (../resources/...) resolve into this project checkout.
-    let output = Command::new(CONSOLE_SOLVER_PATH)
+    println!("DEBUG: About to run command: {}", solver_path.display());
+    let status = Command::new(solver_path)
         .arg("--input_file")
-        .arg(JOB_FILE_PATH)
+        .arg(job_path)
         .arg("-r")
-        .arg(RESOURCE_DIR)
+        .arg(resource_dir)
         .arg("-m")
         .arg("holdem")
-        .output()?;
+        .status()?;
 
-    if !output.status.success() {
+    if !status.success() {
         return Err(format!(
-            "console_solver exited with non-zero status: {}\nStdout: {}\nStderr: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            "console_solver exited with non-zero status: {}",
+            status
         )
         .into());
     }
 
-    if !Path::new(OUTPUT_JSON_PATH).exists() {
-        return Err(format!("expected output JSON not found at {}", OUTPUT_JSON_PATH).into());
+    if !output_path.exists() {
+        return Err(format!("expected output JSON not found at {}", output_path.display()).into());
     }
 
     Ok(())

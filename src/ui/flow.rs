@@ -245,7 +245,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let json_path = "./strategy.json";
+    let json_path = "./strategy_debug.json";
     let tree = load_tree(json_path)?;
 
     let (flop_oop, flop_ip, flop_oop_vs_bet) = hero_strategy_flop_both(&tree, &hero_hand);
@@ -404,7 +404,7 @@ pub fn run_batch(
         return Ok(());
     }
 
-    let json_path = "./strategy.json";
+    let json_path = "./strategy_debug.json";
     let tree = load_tree(json_path)?;
 
     let (flop_oop, flop_ip, flop_oop_vs_bet) = hero_strategy_flop_both(&tree, &hero_hand);
