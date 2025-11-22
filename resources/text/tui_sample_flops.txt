@@ -1,0 +1,24 @@
+# TUI sample test cases (hero, flop, turn, river)
+# 1) Classic high-card board
+Hero: AhKd
+Flop: Qs,Jh,2h
+Turn: 9d
+River: 3c
+
+# 2) Dynamic straight board
+Hero: ThTc
+Flop: 9h,8d,2c
+Turn: 7s
+River: 6h
+
+# 3) Flush board
+Hero: AsKs
+Flop: 2s,7s,Qs
+Turn: Js
+River: Ts
+
+# 4) Paired board
+Hero: 9c9d
+Flop: 9h,9s,2d
+Turn: 2c
+River: 2h

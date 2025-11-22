@@ -1,0 +1,4 @@
+/target
+strategy.json
+resources/outputs/
+*.json
