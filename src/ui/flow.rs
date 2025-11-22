@@ -205,19 +205,33 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 
     // === FLOP ===
-    print!("Enter flop cards (e.g. QsJh2h or Qs,Jh,2h): ");
+    print!("Enter flop cards (e.g. QsJh2h). You can also enter Turn/River (e.g. QsJh2hAcTh): ");
     io::stdout().flush()?;
     input.clear();
     io::stdin().read_line(&mut input)?;
-    let flop_board = normalize_board_fragment(&input);
-    let flop_cards: Vec<&str> = flop_board
+    let all_cards_norm = normalize_board_fragment(&input);
+    let all_cards: Vec<&str> = all_cards_norm
         .split(',')
         .filter(|s| !s.is_empty())
         .collect();
-    if flop_cards.len() != 3 {
+
+    let flop_board;
+    let mut prefilled_turn = None;
+    let mut prefilled_river = None;
+
+    if all_cards.len() == 3 {
+        flop_board = all_cards_norm;
+    } else if all_cards.len() == 4 {
+        flop_board = all_cards[0..3].join(",");
+        prefilled_turn = Some(all_cards[3].to_string());
+    } else if all_cards.len() == 5 {
+        flop_board = all_cards[0..3].join(",");
+        prefilled_turn = Some(all_cards[3].to_string());
+        prefilled_river = Some(all_cards[4].to_string());
+    } else {
         println!(
             "{}",
-            format!("Flop '{}' is invalid (need exactly 3 cards like 'Qs,Jh,2h'). Aborting.", flop_board).red()
+            format!("Input '{}' is invalid (need 3, 4, or 5 cards). Aborting.", all_cards_norm).red()
         );
         return Ok(());
     }
@@ -244,17 +258,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // === TURN ===
-    println!("\nEnter turn card (e.g. 9d). Leave empty to skip: ");
-    io::stdout().flush()?;
-    input.clear();
-    io::stdin().read_line(&mut input)?;
-    let turn_raw = normalize_board_fragment(&input);
-    let turn_card = turn_raw
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let turn_card = if let Some(t) = prefilled_turn {
+        println!("\nTurn card pre-filled: {}", colorize_card(&t));
+        t
+    } else {
+        println!("\nEnter turn card (e.g. 9d). Leave empty to skip: ");
+        io::stdout().flush()?;
+        input.clear();
+        io::stdin().read_line(&mut input)?;
+        let turn_raw = normalize_board_fragment(&input);
+        turn_raw
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .next()
+            .unwrap_or("")
+            .to_string()
+    };
 
     let (_turn_oop, turn_ip) = if !turn_card.is_empty() {
         let (t_oop, t_ip, t_oop_vs_bet) = hero_strategy_turn_both(&tree, &hero_hand, &turn_card).unwrap_or((None, None, None));
@@ -271,17 +290,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // === RIVER ===
-    println!("\nEnter river card (e.g. 3c). Leave empty to skip: ");
-    io::stdout().flush()?;
-    input.clear();
-    io::stdin().read_line(&mut input)?;
-    let river_raw = normalize_board_fragment(&input);
-    let river_card = river_raw
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let river_card = if let Some(r) = prefilled_river {
+        println!("\nRiver card pre-filled: {}", colorize_card(&r));
+        r
+    } else {
+        println!("\nEnter river card (e.g. 3c). Leave empty to skip: ");
+        io::stdout().flush()?;
+        input.clear();
+        io::stdin().read_line(&mut input)?;
+        let river_raw = normalize_board_fragment(&input);
+        river_raw
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .next()
+            .unwrap_or("")
+            .to_string()
+    };
 
     let (_river_oop, river_ip) = if !river_card.is_empty() {
         if turn_card.is_empty() {
